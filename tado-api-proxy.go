@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -31,6 +31,24 @@ type TokenResponse struct {
 	Jti          string `json:"jti"`
 }
 
+type Request struct {
+	Url   string `json:"url"`
+	State string `json:"state"`
+}
+
+type ErrorResponse struct {
+	Error   string  `json:"error"`
+	Request Request `json:"request"`
+}
+
+type EnvironmentKey struct {
+	apiPort      string
+	clientSecret string
+	debug        string
+	password     string
+	username     string
+}
+
 const (
 	clientSecret           = "wZaRN7rpjn3FoNyF5IFuxg9uMzYJcvOoQ8QWiIqS3hfk6gLhVlG57j5YNoZL2Rtc"
 	tokenUrl               = "https://auth.tado.com/oauth/token"
@@ -43,8 +61,15 @@ const (
 )
 
 var (
-	env   environment
-	token TokenResponse
+	env    environment
+	token  TokenResponse
+	envKey = EnvironmentKey{
+		apiPort:      "apiPort",
+		clientSecret: "clientSecret",
+		password:     "password",
+		debug:        "debug",
+		username:     "username",
+	}
 )
 
 func main() {
@@ -68,7 +93,7 @@ func main() {
 
 	router.Use(loggingMiddleware)
 	http.Handle("/", router)
-	log.Info().Msg("Get current state on http://<your hostname>:" + env.apiPort + "/state")
+	log.Info().Msg("Ready. Listen on port " + env.apiPort)
 	log.Fatal().Err(http.ListenAndServe(":"+env.apiPort, nil))
 
 }
@@ -76,10 +101,6 @@ func main() {
 func requestTado(tadoUrl string, responseWriter http.ResponseWriter) {
 
 	log.Debug().Msg("requestTado")
-
-	//	responseWriter.WriteHeader(http.StatusCreated)
-
-	log.Debug().Msg(token.AccessToken)
 
 	client := &http.Client{}
 	req, _ := http.NewRequest("GET", tadoUrl, nil)
@@ -90,15 +111,25 @@ func requestTado(tadoUrl string, responseWriter http.ResponseWriter) {
 	defer resp.Body.Close()
 	respBody, _ := io.ReadAll(resp.Body)
 
-	fmt.Println(string(respBody))
-
 	if resp.StatusCode == http.StatusOK {
 		responseWriter.Write(respBody)
 		responseWriter.WriteHeader(http.StatusOK)
 	} else {
+		errorResponse := ErrorResponse{
+			Request: Request{
+				Url:   tadoUrl,
+				State: resp.Status,
+			},
+			Error: "Request failed with error",
+		}
+
+		enc := json.NewEncoder(responseWriter)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(errorResponse); err != nil {
+			panic(err)
+		}
 		responseWriter.WriteHeader(http.StatusInternalServerError)
-		log.Debug().Str("request", req.URL.String()).Msg("The request failed.")
-		log.Fatal().Str("http-state", resp.Status).Msg("Request failed with error.")
+		log.Error().Str("http-state", resp.Status).Str("url", tadoUrl).Msg("Request failed with error.")
 	}
 
 }
@@ -107,9 +138,38 @@ func getHome(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getHome")
 
-	homeId := request.URL.Query().Get("homeId")
+	homeId, err := checkParameter("homeId", request, responseWriter)
+	if err != nil {
+		return
+	}
+
 	tadoUrl := strings.Replace(homesUrl, "<homeId>", homeId, 1)
 	requestTado(tadoUrl, responseWriter)
+
+}
+
+func checkParameter(parameterKey string, request *http.Request, writer http.ResponseWriter) (parameter string, err error) {
+
+	parameter = request.URL.Query().Get(parameterKey)
+	if parameter == "" {
+		errorResponse := ErrorResponse{
+			Request: Request{
+				Url:   "",
+				State: "",
+			},
+			Error: "Missing parameter " + parameterKey,
+		}
+
+		enc := json.NewEncoder(writer)
+		enc.SetIndent("", "    ")
+		if err := enc.Encode(errorResponse); err != nil {
+			panic(err)
+		}
+		writer.WriteHeader(http.StatusInternalServerError)
+		return "", errors.New(errorResponse.Error)
+	}
+
+	return parameter, nil
 
 }
 
@@ -117,7 +177,11 @@ func getZones(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getZones")
 
-	homeId := request.URL.Query().Get("homeId")
+	homeId, err := checkParameter("homeId", request, responseWriter)
+	if err != nil {
+		return
+	}
+
 	tadoUrl := strings.Replace(zonesUrl, "<homeId>", homeId, 1)
 	requestTado(tadoUrl, responseWriter)
 
@@ -127,7 +191,11 @@ func getWeather(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getWeather")
 
-	homeId := request.URL.Query().Get("homeId")
+	homeId, err := checkParameter("homeId", request, responseWriter)
+	if err != nil {
+		return
+	}
+
 	tadoUrl := strings.Replace(weatherUrl, "<homeId>", homeId, 1)
 	requestTado(tadoUrl, responseWriter)
 
@@ -137,8 +205,15 @@ func getZoneState(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getZoneState")
 
-	homeId := request.URL.Query().Get("homeId")
-	zone := request.URL.Query().Get("zone")
+	homeId, err := checkParameter("homeId", request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	zone, err := checkParameter("zone", request, responseWriter)
+	if err != nil {
+		return
+	}
 
 	tadoUrl := strings.Replace(zonesStateUrl, "<homeId>", homeId, 1)
 	tadoUrl = strings.Replace(tadoUrl, "<zone>", zone, 1)
@@ -150,18 +225,29 @@ func getZoneStateDayReport(responseWriter http.ResponseWriter, request *http.Req
 
 	log.Debug().Msg("getZoneStateDayReport")
 
-	homeId := request.URL.Query().Get("homeId")
-	zone := request.URL.Query().Get("zone")
-	day := request.URL.Query().Get("date")
+	homeId, err := checkParameter("homeId", request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	zone, err := checkParameter("zone", request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	date, err := checkParameter("date", request, responseWriter)
+	if err != nil {
+		return
+	}
 
 	tadoUrl := strings.Replace(zoneStateDateReportUrl, "<homeId>", homeId, 1)
 	tadoUrl = strings.Replace(tadoUrl, "<zone>", zone, 1)
-	tadoUrl = strings.Replace(tadoUrl, "<date>", day, 1)
+	tadoUrl = strings.Replace(tadoUrl, "<date>", date, 1)
 	requestTado(tadoUrl, responseWriter)
 
 }
 
-func getMe(responseWriter http.ResponseWriter, request *http.Request) {
+func getMe(responseWriter http.ResponseWriter, _ *http.Request) {
 
 	log.Debug().Msg("getMe")
 	requestTado(meUrl, responseWriter)
@@ -243,42 +329,42 @@ func refreshToken() {
 func initEnvironmentVariables() {
 
 	log.Info().Msg("Usage:")
-	log.Info().Str("apiPort", "Process listening on this port.").Msg("Optional, default is 8080.")
-	log.Info().Str("clientSecret", "Client password").Msg("Optional, Default is " + clientSecret)
-	log.Info().Str("debug", "false").Msg("Optional: Use debug mode for logging (true | false ). ")
-	log.Info().Str("password", "Your password").Msg("Mandatory environment parameter.")
-	log.Info().Str("username", "Your username").Msg("Mandatory environment parameter.")
+	log.Info().Str(envKey.apiPort, "Process listening on this port.").Msg("Optional, default is 8080.")
+	log.Info().Str(envKey.clientSecret, "Client password").Msg("Optional, Default is " + clientSecret)
+	log.Info().Str(envKey.debug, "false").Msg("Optional: Use debug mode for logging (true | false ). ")
+	log.Info().Str(envKey.password, "Your password").Msg("Mandatory environment parameter.")
+	log.Info().Str(envKey.username, "Your username").Msg("Mandatory environment parameter.")
 
-	env.apiPort = getEnv("apiPort", "8080")
+	env.apiPort = getEnv(envKey.apiPort, "8080")
 	if len(env.apiPort) == 0 {
 		log.Fatal().Msg("The environment variable apiPort is unset. Please fix this.")
 	}
 
-	env.username = getEnv("username", "")
+	env.username = getEnv(envKey.username, "")
 
 	if len(env.username) == 0 {
 		log.Fatal().Msg("The environment variable username is unset. Please fix this.")
 	}
 
-	env.password = getEnv("password", "")
+	env.password = getEnv(envKey.password, "")
 	if len(env.password) == 0 {
 		log.Fatal().Msg("The environment variable password is unset. Please fix this.")
 	}
 
-	env.clientSecret = getEnv("clientSecret", clientSecret)
+	env.clientSecret = getEnv(envKey.clientSecret, clientSecret)
 	if len(env.clientSecret) == 0 {
 		log.Fatal().Msg("The environment variable clientSecret is unset. Please fix this.")
 	}
 
 	var err error
-	debug := getEnv("debug", "false")
+	debug := getEnv(envKey.debug, "false")
 	env.debug, err = strconv.ParseBool(debug)
 
 	if err != nil {
-		log.Fatal().Err(err).Str("debug", debug)
+		log.Fatal().Err(err).Str(envKey.debug, debug)
 	}
 
-	log.Info().Str("debug", strconv.FormatBool(env.debug)).Msg("Log debug mode.")
+	log.Info().Str(envKey.debug, strconv.FormatBool(env.debug)).Msg("Log debug mode.")
 
 }
 
