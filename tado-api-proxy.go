@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -31,6 +32,147 @@ type TokenResponse struct {
 	Jti          string `json:"jti"`
 }
 
+type StateReport struct {
+	CallForHeat struct {
+		DataIntervals []struct {
+			From  time.Time `json:"from"`
+			To    time.Time `json:"to"`
+			Value string    `json:"value"`
+		} `json:"dataIntervals"`
+		TimeSeriesType string `json:"timeSeriesType"`
+		ValueType      string `json:"valueType"`
+	} `json:"callForHeat"`
+	HoursInDay int `json:"hoursInDay"`
+	Interval   struct {
+		From time.Time `json:"from"`
+		To   time.Time `json:"to"`
+	} `json:"interval"`
+	MeasuredData struct {
+		Humidity struct {
+			DataPoints []struct {
+				Timestamp time.Time `json:"timestamp"`
+				Value     float64   `json:"value"`
+			} `json:"dataPoints"`
+			Max            float64 `json:"max"`
+			Min            float64 `json:"min"`
+			PercentageUnit string  `json:"percentageUnit"`
+			TimeSeriesType string  `json:"timeSeriesType"`
+			ValueType      string  `json:"valueType"`
+		} `json:"humidity"`
+		InsideTemperature struct {
+			DataPoints []struct {
+				Timestamp time.Time `json:"timestamp"`
+				Value     struct {
+					Celsius    float64 `json:"celsius"`
+					Fahrenheit float64 `json:"fahrenheit"`
+				} `json:"value"`
+			} `json:"dataPoints"`
+			Max struct {
+				Celsius    float64 `json:"celsius"`
+				Fahrenheit float64 `json:"fahrenheit"`
+			} `json:"max"`
+			Min struct {
+				Celsius    float64 `json:"celsius"`
+				Fahrenheit float64 `json:"fahrenheit"`
+			} `json:"min"`
+			TimeSeriesType string `json:"timeSeriesType"`
+			ValueType      string `json:"valueType"`
+		} `json:"insideTemperature"`
+		MeasuringDeviceConnected struct {
+			DataIntervals []struct {
+				From  time.Time `json:"from"`
+				To    time.Time `json:"to"`
+				Value bool      `json:"value"`
+			} `json:"dataIntervals"`
+			TimeSeriesType string `json:"timeSeriesType"`
+			ValueType      string `json:"valueType"`
+		} `json:"measuringDeviceConnected"`
+	} `json:"measuredData"`
+	Settings struct {
+		DataIntervals []struct {
+			From  time.Time `json:"from"`
+			To    time.Time `json:"to"`
+			Value struct {
+				Power       string      `json:"power"`
+				Temperature interface{} `json:"temperature"`
+				Type        string      `json:"type"`
+			} `json:"value"`
+		} `json:"dataIntervals"`
+		TimeSeriesType string `json:"timeSeriesType"`
+		ValueType      string `json:"valueType"`
+	} `json:"settings"`
+	Stripes struct {
+		DataIntervals []struct {
+			From  time.Time `json:"from"`
+			To    time.Time `json:"to"`
+			Value struct {
+				Setting struct {
+					Power       string      `json:"power"`
+					Temperature interface{} `json:"temperature"`
+					Type        string      `json:"type"`
+				} `json:"setting"`
+				StripeType string `json:"stripeType"`
+			} `json:"value"`
+		} `json:"dataIntervals"`
+		TimeSeriesType string `json:"timeSeriesType"`
+		ValueType      string `json:"valueType"`
+	} `json:"stripes"`
+	Weather struct {
+		Condition struct {
+			DataIntervals []struct {
+				From  time.Time `json:"from"`
+				To    time.Time `json:"to"`
+				Value struct {
+					State       string `json:"state"`
+					Temperature struct {
+						Celsius    float64 `json:"celsius"`
+						Fahrenheit float64 `json:"fahrenheit"`
+					} `json:"temperature"`
+				} `json:"value"`
+			} `json:"dataIntervals"`
+			TimeSeriesType string `json:"timeSeriesType"`
+			ValueType      string `json:"valueType"`
+		} `json:"condition"`
+		Slots struct {
+			Slots struct {
+				_04_00 struct {
+					State       string `json:"state"`
+					Temperature struct {
+						Celsius    float64 `json:"celsius"`
+						Fahrenheit float64 `json:"fahrenheit"`
+					} `json:"temperature"`
+				} `json:"04:00"`
+				_08_00 struct {
+					State       string `json:"state"`
+					Temperature struct {
+						Celsius    float64 `json:"celsius"`
+						Fahrenheit float64 `json:"fahrenheit"`
+					} `json:"temperature"`
+				} `json:"08:00"`
+				_12_00 struct {
+					State       string `json:"state"`
+					Temperature struct {
+						Celsius    float64 `json:"celsius"`
+						Fahrenheit float64 `json:"fahrenheit"`
+					} `json:"temperature"`
+				} `json:"12:00"`
+			} `json:"slots"`
+			TimeSeriesType string `json:"timeSeriesType"`
+			ValueType      string `json:"valueType"`
+		} `json:"slots"`
+		Sunny struct {
+			DataIntervals []struct {
+				From  time.Time `json:"from"`
+				To    time.Time `json:"to"`
+				Value bool      `json:"value"`
+			} `json:"dataIntervals"`
+			TimeSeriesType string `json:"timeSeriesType"`
+			ValueType      string `json:"valueType"`
+		} `json:"sunny"`
+	} `json:"weather"`
+	ZoneType string `json:"zoneType"`
+}
+
 type Request struct {
 	Url   string `json:"url"`
 	State string `json:"state"`
@@ -47,6 +189,14 @@ type EnvironmentKey struct {
 	debug        string
 	password     string
 	username     string
+}
+
+type RequestParameter struct {
+	homeId   string
+	zone     string
+	date     string
+	dateFrom string
+	dateTo   string
 }
 
 const (
@@ -70,6 +220,13 @@ var (
 		debug:        "debug",
 		username:     "username",
 	}
+	requestParameter = RequestParameter{
+		homeId:   "homeId",
+		date:     "date",
+		dateTo:   "dateTo",
+		dateFrom: "dateFrom",
+		zone:     "zone",
+	}
 )
 
 func main() {
@@ -87,6 +244,7 @@ func main() {
 	router.HandleFunc("/me", getMe)
 	router.HandleFunc("/home", getHome)
 	router.HandleFunc("/weather", getWeather)
+	router.HandleFunc("/weatherHistory", getWeatherHistory)
 	router.HandleFunc("/zones", getZones)
 	router.HandleFunc("/zoneState", getZoneState)
 	router.HandleFunc("/zoneStateDateReport", getZoneStateDayReport)
@@ -95,6 +253,152 @@ func main() {
 	http.Handle("/", router)
 	log.Info().Msg("Ready. Listen on port " + env.apiPort)
 	log.Fatal().Err(http.ListenAndServe(":"+env.apiPort, nil))
+
+}
+
+func getWeatherHistory(responseWriter http.ResponseWriter, request *http.Request) {
+
+	log.Debug().Msg("getZoneStateDayReport")
+
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	zone, err := checkParameter(requestParameter.zone, request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	dateFrom, err := checkParameter(requestParameter.dateFrom, request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	dateTo, err := checkParameter(requestParameter.dateTo, request, responseWriter)
+	if err != nil {
+		return
+	}
+
+	content := ""
+	content = content + "#group,false,false,true,true,false,false,true,true,true" + "\n"
+	content = content + "#datatype,string,long,dateTime:RFC3339,dateTime:RFC3339,dateTime:RFC3339,double,string,string,string" + "\n"
+	content = content + "#default,last,,,,,,,," + "\n"
+	content = content + ",result,table,_start,_stop,_time,_value,_field,_measurement,room" + "\n"
+	temperatureLineTemplate := ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Badezimmer" + "\n"
+
+	for i := 1; i < 9; i++ {
+
+		from, _ := time.Parse("2006-01-02", dateFrom)
+		to, _ := time.Parse("2006-01-02", dateTo)
+		currentDate := from
+
+		if i == 1 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Büro" + "\n"
+			zone = "1"
+		}
+
+		if i == 2 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Badezimmer" + "\n"
+			zone = "2"
+		}
+		if i == 3 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Gäste WC" + "\n"
+			zone = "3"
+		}
+		if i == 4 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Wohnzimmer" + "\n"
+			zone = "4"
+		}
+		if i == 5 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Datsche" + "\n"
+			zone = "5"
+		}
+		if i == 6 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Schlafzimmer" + "\n"
+			zone = "6"
+		}
+		if i == 7 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Datsche Büro" + "\n"
+			zone = "12"
+		}
+		if i == 8 {
+			temperatureLineTemplate = ",,0,2022-12-07T17:44:21.54868924Z,2022-12-07T18:44:21.54868924Z,<time>,<temperature>,activityDataPoints_heatingPower_percentage,tado,Datsche Bad" + "\n"
+			zone = "13"
+		}
+
+		for {
+			log.Info().Msgf("Date %v", currentDate)
+			stateReport, err := findWeatherForDate(currentDate, homeId, zone)
+			for _, s := range stateReport.CallForHeat.DataIntervals {
+				var value float64 = 0.0
+				switch s.Value {
+				case "LOW":
+					value = 25.0
+				case "MEDIUM":
+					value = 60.0
+				case "HIGH":
+					value = 100.0
+				}
+				temperature := fmt.Sprintf("%f", value)
+				time := s.From.Format(time.RFC3339)
+				temperatureLine := strings.Replace(temperatureLineTemplate, "<time>", time, 1)
+				temperatureLine = strings.Replace(temperatureLine, "<temperature>", temperature, 1)
+				content = content + temperatureLine
+			}
+			if err != nil {
+
+			}
+			currentDate = currentDate.Add(time.Hour * 24)
+			if currentDate.Unix() > to.Unix() {
+				break
+			}
+		}
+	}
+
+	responseWriter.Write([]byte(content))
+	responseWriter.WriteHeader(http.StatusOK)
+
+}
+
+func findWeatherForDate(date time.Time, homeId string, zone string) (stateReport StateReport, err error) {
+
+	tadoUrl := strings.Replace(zoneStateDateReportUrl, "<homeId>", homeId, 1)
+	tadoUrl = strings.Replace(tadoUrl, "<zone>", zone, 1)
+	tadoUrl = strings.Replace(tadoUrl, "<date>", date.Format("2006-01-02"), 1)
+
+	content, err := getTadoData(tadoUrl)
+	if err != nil {
+		return stateReport, err
+	}
+
+	err = json.Unmarshal(content, &stateReport)
+	if err != nil {
+		return stateReport, err
+	}
+	return stateReport, nil
+
+}
+
+func getTadoData(tadoUrl string) (content []byte, err error) {
+
+	log.Debug().Msg("requestTado")
+
+	client := &http.Client{}
+	req, _ := http.NewRequest("GET", tadoUrl, nil)
+	req.Header.Add("Accept", "application/json")
+	req.Header.Add("Authorization", "Bearer "+token.AccessToken)
+	resp, _ := client.Do(req)
+
+	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		log.Error().Str("http-state", resp.Status).Str("url", tadoUrl).Msg("Request failed with error.")
+		return respBody, errors.New("request failed with error")
+	}
+
+	return respBody, nil
 
 }
 
@@ -138,7 +442,7 @@ func getHome(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getHome")
 
-	homeId, err := checkParameter("homeId", request, responseWriter)
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
 	if err != nil {
 		return
 	}
@@ -177,7 +481,7 @@ func getZones(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getZones")
 
-	homeId, err := checkParameter("homeId", request, responseWriter)
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
 	if err != nil {
 		return
 	}
@@ -191,7 +495,7 @@ func getWeather(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getWeather")
 
-	homeId, err := checkParameter("homeId", request, responseWriter)
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
 	if err != nil {
 		return
 	}
@@ -205,12 +509,12 @@ func getZoneState(responseWriter http.ResponseWriter, request *http.Request) {
 
 	log.Debug().Msg("getZoneState")
 
-	homeId, err := checkParameter("homeId", request, responseWriter)
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
 	if err != nil {
 		return
 	}
 
-	zone, err := checkParameter("zone", request, responseWriter)
+	zone, err := checkParameter(requestParameter.zone, request, responseWriter)
 	if err != nil {
 		return
 	}
@@ -225,17 +529,17 @@ func getZoneStateDayReport(responseWriter http.ResponseWriter, request *http.Req
 
 	log.Debug().Msg("getZoneStateDayReport")
 
-	homeId, err := checkParameter("homeId", request, responseWriter)
+	homeId, err := checkParameter(requestParameter.homeId, request, responseWriter)
 	if err != nil {
 		return
 	}
 
-	zone, err := checkParameter("zone", request, responseWriter)
+	zone, err := checkParameter(requestParameter.zone, request, responseWriter)
 	if err != nil {
 		return
 	}
 
-	date, err := checkParameter("date", request, responseWriter)
+	date, err := checkParameter(requestParameter.date, request, responseWriter)
 	if err != nil {
 		return
 	}
